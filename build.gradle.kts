@@ -4,7 +4,7 @@ plugins {
 }
 
 group   = "com.github.gajjela521"
-version = "1.1.0"
+version = "1.2.0"
 
 repositories {
     mavenCentral()
@@ -18,6 +18,8 @@ java {
 
 application {
     mainClass.set("com.github.gajjela521.coalescex.SimulationHarness")
+    // Enable preview features for the forked run process.
+    applicationDefaultJvmArgs = listOf("--enable-preview")
 }
 
 dependencies {
@@ -29,16 +31,20 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-tasks.test {
-    useJUnitPlatform()
-    // enable virtual-thread tests on the test JVM
-    jvmArgs("--enable-preview")
-}
-
 tasks.withType<JavaCompile> {
     options.compilerArgs.addAll(listOf("--enable-preview", "-Xlint:all", "-Xlint:-preview"))
 }
 
-tasks.withType<JavaExec> {
+tasks.test {
+    useJUnitPlatform()
     jvmArgs("--enable-preview")
+}
+
+// Allow extra JVM args to be passed in from CI:
+//   ./gradlew run --jvm-args="-Djdk.tracePinnedThreads=full"
+val jvmArgsFromCli: String? = findProperty("jvmargs") as String?
+if (!jvmArgsFromCli.isNullOrBlank()) {
+    tasks.withType<JavaExec> {
+        jvmArgs(jvmArgsFromCli.trim().split("\\s+".toRegex()))
+    }
 }

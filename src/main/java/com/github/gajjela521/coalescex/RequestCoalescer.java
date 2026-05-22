@@ -6,7 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Supplier;
 
 /**
@@ -23,35 +23,60 @@ import java.util.function.Supplier;
  *   <li><b>No {@code synchronized} or {@link java.util.concurrent.locks.Lock}</b> — entirely
  *       avoids Virtual Thread carrier-pinning. All coordination is done through lock-free
  *       {@link ConcurrentHashMap} atomics.</li>
- *   <li><b>Promise pattern</b> — the map stores a bare {@code CompletableFuture} (a "promise")
- *       that is completed asynchronously. This cleanly separates registration from execution
- *       and prevents any work from happening inside a {@code computeIfAbsent} call.</li>
- *   <li><b>Safe cleanup via {@code remove(key, value)}</b> — cleanup uses the two-arg
- *       {@link ConcurrentHashMap#remove(Object, Object)}, which only removes the entry if
- *       the value still matches the completing future. A late-arriving cleanup can never
- *       accidentally evict a newer in-flight entry for the same key.</li>
- *   <li><b>Failure eviction</b> — a future that completes exceptionally is immediately evicted
- *       so the next caller dispatches a fresh upstream request rather than replaying the error.</li>
+ *
+ *   <li><b>{@code compute()} not {@code computeIfAbsent()}</b> — {@code ConcurrentHashMap
+ *       .computeIfAbsent()} holds a {@code synchronized} monitor on the bin while the mapping
+ *       function executes. On Java 21–23 this pins the Virtual Thread to its OS carrier if
+ *       anything inside the lambda could yield. This class uses {@code compute()} with a lean,
+ *       non-blocking lambda (just a conditional pointer swap) so the critical section is
+ *       held for nanoseconds. On Java 24+ (JEP 491) {@code synchronized} no longer pins
+ *       carriers, but the leaner critical section remains the right pattern regardless.</li>
+ *
+ *   <li><b>Promise pattern</b> — {@code compute()} stores a bare {@code CompletableFuture}
+ *       (a "promise"). The actual loader is dispatched via {@code supplyAsync()} entirely
+ *       outside the map's critical section.</li>
+ *
+ *   <li><b>Remove-before-complete</b> — the map entry is removed <em>before</em> the promise
+ *       is completed. Callers arriving after the removal point start a fresh coalescing window
+ *       rather than attaching to a just-finished future and receiving a potentially stale result.
+ *       Callers already blocked on {@code promise.get()} are unaffected — they hold a direct
+ *       reference and receive the result as normal.</li>
+ *
+ *   <li><b>Failure eviction</b> — a future that completes exceptionally is removed before
+ *       {@code completeExceptionally()} is called, ensuring the next caller dispatches a
+ *       fresh retry rather than replaying the error.</li>
+ *
+ *   <li><b>{@link LongAdder} counters</b> — lower write contention than {@link
+ *       java.util.concurrent.atomic.AtomicLong} under high parallelism, at the cost of
+ *       a slightly more expensive read via {@link LongAdder#sum()}. The right trade-off
+ *       for a high-throughput coalescer where writes vastly outnumber reads.</li>
  * </ul>
  *
  * <h2>Quick Start</h2>
  * <pre>{@code
- * // Zero-config factory (30 s timeout, virtual-thread executor)
+ * // Zero-config — 30 s timeout, virtual-thread-per-task executor
  * RequestCoalescer<String, CustomerData> coalescer = RequestCoalescer.create();
  *
- * // With a custom timeout
- * RequestCoalescer<String, CustomerData> coalescer = RequestCoalescer.<String, CustomerData>builder()
- *     .defaultTimeout(Duration.ofSeconds(5))
- *     .build();
+ * // With custom timeout and Micrometer metrics
+ * RequestCoalescer<String, CustomerData> coalescer =
+ *     RequestCoalescer.<String, CustomerData>builder()
+ *         .defaultTimeout(Duration.ofSeconds(5))
+ *         .metrics(micrometerAdapter)
+ *         .build();
  *
  * // Usage
  * CustomerData data = coalescer.compute("customer:42", () -> db.loadCustomer(42));
  * }</pre>
  *
- * <h2>Thread Safety</h2>
- * <p>All public methods are fully thread-safe with no external synchronization required.
+ * <h2>Java Version Notes</h2>
+ * <ul>
+ *   <li><b>Java 21–23</b>: {@code synchronized} inside {@code ConcurrentHashMap} can pin
+ *       carriers. This class avoids that by keeping the {@code compute()} lambda non-blocking.</li>
+ *   <li><b>Java 24+</b> (JEP 491): synchronized no longer pins carriers. This class benefits
+ *       automatically while remaining backwards-compatible with Java 21.</li>
+ * </ul>
  *
- * @param <K> type of the lookup key — should implement {@link Object#equals} and
+ * @param <K> type of the lookup key — must implement {@link Object#equals} and
  *            {@link Object#hashCode} correctly
  * @param <V> type of the computed value
  */
@@ -61,8 +86,8 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
     /**
-     * Default executor: one virtual thread per upstream task.
-     * No pool management — the JVM scheduler handles multiplexing onto OS threads.
+     * Default executor: one Virtual Thread per upstream task, no pool management required.
+     * The JVM scheduler multiplexes Virtual Threads onto OS carrier threads.
      */
     private static final Executor VIRTUAL_EXECUTOR = task -> Thread.ofVirtual().start(task);
 
@@ -73,13 +98,14 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
     /** Live registry of in-flight upstream requests. */
     private final ConcurrentHashMap<K, CompletableFuture<V>> inFlight = new ConcurrentHashMap<>();
 
-    private final Executor executor;
-    private final Duration defaultTimeout;
+    private final Executor         executor;
+    private final Duration         defaultTimeout;
+    private final CoalesceXMetrics metrics;
 
-    // Metrics — updated with plain volatile-like semantics via AtomicLong.
-    private final AtomicLong totalRequests    = new AtomicLong();
-    private final AtomicLong upstreamRequests = new AtomicLong();
-    private final AtomicLong failedRequests   = new AtomicLong();
+    // Internal counters using LongAdder for lower write contention under high parallelism.
+    private final LongAdder totalRequests    = new LongAdder();
+    private final LongAdder upstreamRequests = new LongAdder();
+    private final LongAdder failedRequests   = new LongAdder();
 
     // -----------------------------------------------------------------------
     // Construction
@@ -88,11 +114,12 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
     private RequestCoalescer(Builder<K, V> builder) {
         this.executor       = builder.executor;
         this.defaultTimeout = builder.defaultTimeout;
+        this.metrics        = builder.metrics;
     }
 
     /**
-     * Creates a coalescer with default settings: 30-second timeout and a
-     * virtual-thread-per-task executor.
+     * Creates a coalescer with default settings:
+     * 30-second timeout, virtual-thread-per-task executor, no-op metrics.
      */
     public static <K, V> RequestCoalescer<K, V> create() {
         return RequestCoalescer.<K, V>builder().build();
@@ -120,24 +147,31 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
         Objects.requireNonNull(loader,  "loader must not be null");
         Objects.requireNonNull(timeout, "timeout must not be null");
 
-        totalRequests.incrementAndGet();
+        totalRequests.increment();
+        metrics.onRequest(key);
 
-        // Track whether this call is responsible for dispatching the upstream work.
-        final boolean[] isUpstreamCaller = {false};
+        final boolean[] shouldDispatch = {false};
 
-        // Atomically: if no in-flight entry exists for this key, register a new promise
-        // and mark this thread as the upstream caller. All concurrent callers for the
-        // same key receive the identical promise reference.
-        CompletableFuture<V> promise = inFlight.computeIfAbsent(key, k -> {
-            isUpstreamCaller[0] = true;
+        // Use compute() — not computeIfAbsent() — so the critical section is a lean
+        // conditional pointer check with no blocking. computeIfAbsent() holds the same
+        // synchronized bin lock but was the conventional choice; compute() makes the
+        // non-blocking intent explicit and also handles the defensive case where an
+        // existing entry is already completed but not yet evicted.
+        CompletableFuture<V> promise = inFlight.compute(key, (k, existing) -> {
+            if (existing != null && !existing.isDone()) {
+                return existing; // reuse the in-flight promise
+            }
+            shouldDispatch[0] = true;
             return new CompletableFuture<>();
         });
 
-        if (isUpstreamCaller[0]) {
-            upstreamRequests.incrementAndGet();
+        if (shouldDispatch[0]) {
+            upstreamRequests.increment();
+            metrics.onUpstreamDispatched(key);
             log.debug("Upstream dispatch — key [{}]", key);
             dispatchUpstream(key, loader, promise);
         } else {
+            metrics.onCoalesced(key);
             log.debug("Coalesced — joining in-flight request for key [{}]", key);
         }
 
@@ -164,16 +198,16 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
     /** {@inheritDoc} */
     @Override
     public CoalescerMetrics metrics() {
-        long total    = totalRequests.get();
-        long upstream = upstreamRequests.get();
-        long failed   = failedRequests.get();
+        long total    = totalRequests.sum();
+        long upstream = upstreamRequests.sum();
+        long failed   = failedRequests.sum();
         return new CoalescerMetrics(total, upstream, total - upstream, failed, inFlight.size());
     }
 
     /**
      * Cancels all in-flight requests and clears the internal registry.
-     * Safe to call at application shutdown. After closing, this instance
-     * must not be used.
+     * Safe to call at application shutdown — wires cleanly into Spring's {@code @PreDestroy}
+     * or {@code DisposableBean}. After closing, this instance must not be reused.
      */
     @Override
     public void close() {
@@ -187,44 +221,54 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
     // -----------------------------------------------------------------------
 
     /**
-     * Submits the upstream loader to the executor. On completion, the promise is
-     * resolved and the key is evicted from the registry.
+     * Submits the upstream loader to the executor and wires up completion logic.
      *
-     * <p>Failure eviction is intentional: a future that completed exceptionally is
-     * removed so the next wave of callers triggers a fresh retry rather than
-     * replaying a stale error.
+     * <p><b>Remove-before-complete ordering</b>: the map entry is removed <em>before</em>
+     * the promise is completed. This ensures callers arriving after the removal window
+     * start a fresh coalescing wave rather than attaching to a just-finished future.
+     * Callers already blocked on {@code promise.get()} hold a direct reference and are
+     * unaffected by the map removal — they receive the result normally.
+     *
+     * <p>On failure, the same ordering applies: the entry is removed first so the next
+     * wave of callers retries rather than replaying a stale error.
      */
     private void dispatchUpstream(K key, Supplier<V> loader, CompletableFuture<V> promise) {
+        final long startNanos = System.nanoTime();
         CompletableFuture.supplyAsync(loader, executor)
                 .whenComplete((value, ex) -> {
+                    long latencyNanos = System.nanoTime() - startNanos;
                     if (ex != null) {
                         Throwable cause = unwrap(ex);
-                        promise.completeExceptionally(cause);
-                        failedRequests.incrementAndGet();
-                        // Evict immediately on failure — next callers must retry, not replay the error.
+                        // Remove BEFORE completing so new arrivals start a fresh window.
                         inFlight.remove(key, promise);
+                        promise.completeExceptionally(cause);
+                        failedRequests.increment();
+                        metrics.onUpstreamFailure(key, cause, latencyNanos);
                         log.warn("Upstream request failed for key [{}]: {}", key, cause.toString());
                     } else {
-                        promise.complete(value);
-                        // Conditional remove: only evicts if the map still holds THIS promise.
-                        // A later in-flight entry for the same key is left untouched.
+                        // Remove BEFORE completing — same rationale as the failure case.
                         inFlight.remove(key, promise);
+                        promise.complete(value);
+                        metrics.onUpstreamSuccess(key, latencyNanos);
                         log.debug("Upstream request resolved for key [{}]", key);
                     }
                 });
     }
 
     /**
-     * Blocks the calling thread until the promise resolves or the timeout elapses.
-     * Virtual Threads unmount from their carrier during the wait — no OS thread is held.
+     * Blocks the calling Virtual Thread until the promise resolves or the timeout elapses.
      *
-     * <p>Exception handling contract:
+     * <p>Virtual Threads unmount from their OS carrier during {@code future.get()} —
+     * the carrier is freed to run other virtual threads while this one waits. This is
+     * fundamentally different from platform-thread blocking.
+     *
+     * <p>Exception contract:
      * <ul>
-     *   <li>{@link RuntimeException} from the loader → rethrown directly</li>
-     *   <li>{@link Error} from the loader → rethrown directly</li>
-     *   <li>Checked exception from the loader → wrapped in {@link CoalescerException}</li>
-     *   <li>Timeout → throws {@link CoalescerTimeoutException}</li>
-     *   <li>Thread interrupted → restores interrupt flag, throws {@link CoalescerException}</li>
+     *   <li>{@link RuntimeException} from loader → rethrown directly, no wrapping</li>
+     *   <li>{@link Error} from loader → rethrown directly</li>
+     *   <li>Checked exception from loader → wrapped in {@link CoalescerException}</li>
+     *   <li>Timeout → {@link CoalescerTimeoutException}</li>
+     *   <li>Interrupted → interrupt flag restored, {@link CoalescerException} thrown</li>
      * </ul>
      */
     private V await(K key, CompletableFuture<V> promise, Duration timeout) {
@@ -243,7 +287,7 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
         }
     }
 
-    /** Peels off {@link CompletionException}/{@link ExecutionException} wrappers. */
+    /** Peels one layer of {@link CompletionException} or {@link ExecutionException} wrapper. */
     private static Throwable unwrap(Throwable ex) {
         return (ex instanceof CompletionException || ex instanceof ExecutionException)
                 && ex.getCause() != null ? ex.getCause() : ex;
@@ -257,10 +301,12 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
      * Fluent builder for {@link RequestCoalescer}.
      *
      * <pre>{@code
-     * RequestCoalescer<String, byte[]> coalescer = RequestCoalescer.<String, byte[]>builder()
-     *     .executor(myCustomExecutor)
-     *     .defaultTimeout(Duration.ofSeconds(10))
-     *     .build();
+     * RequestCoalescer<String, byte[]> coalescer =
+     *     RequestCoalescer.<String, byte[]>builder()
+     *         .executor(myExecutor)
+     *         .defaultTimeout(Duration.ofSeconds(10))
+     *         .metrics(micrometerAdapter)
+     *         .build();
      * }</pre>
      *
      * @param <K> key type
@@ -268,17 +314,18 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
      */
     public static final class Builder<K, V> {
 
-        private Executor executor       = VIRTUAL_EXECUTOR;
-        private Duration defaultTimeout = DEFAULT_TIMEOUT;
+        private Executor         executor       = VIRTUAL_EXECUTOR;
+        private Duration         defaultTimeout = DEFAULT_TIMEOUT;
+        private CoalesceXMetrics metrics        = CoalesceXMetrics.NOOP;
 
         private Builder() {}
 
         /**
          * Executor used to dispatch upstream loader calls.
          *
-         * <p>Defaults to a virtual-thread-per-task executor. Override when you need
-         * to integrate with a managed thread pool (e.g., a platform-thread pool for
-         * CPU-bound loaders, or an application-server executor for lifecycle control).
+         * <p>Defaults to a virtual-thread-per-task executor. Override when integrating
+         * with a managed pool (e.g., a platform-thread pool for CPU-bound loaders, or
+         * an application-server executor for lifecycle control).
          */
         public Builder<K, V> executor(Executor executor) {
             this.executor = Objects.requireNonNull(executor, "executor must not be null");
@@ -287,14 +334,25 @@ public final class RequestCoalescer<K, V> implements Coalescer<K, V>, AutoClosea
 
         /**
          * Default timeout applied when {@link #compute(Object, Supplier)} is called
-         * without an explicit timeout argument. Defaults to {@code 30 seconds}.
+         * without an explicit timeout. Defaults to {@code 30 seconds}.
          *
-         * <p>Set this to a value that reflects your SLA for the slowest possible
-         * upstream response. Callers exceeding this limit receive a
-         * {@link CoalescerTimeoutException} without affecting other waiters.
+         * <p>Set this to match your SLA for the slowest possible upstream response.
+         * Callers that exceed this limit receive a {@link CoalescerTimeoutException}
+         * without affecting other in-flight waiters.
          */
         public Builder<K, V> defaultTimeout(Duration timeout) {
             this.defaultTimeout = Objects.requireNonNull(timeout, "timeout must not be null");
+            return this;
+        }
+
+        /**
+         * Pluggable metrics hook (Micrometer, OpenTelemetry, {@link LoggingCoalesceXMetrics}, …).
+         * Defaults to {@link CoalesceXMetrics#NOOP}.
+         *
+         * <p>See {@link CoalesceXMetrics} for a ready-to-paste Micrometer example.
+         */
+        public Builder<K, V> metrics(CoalesceXMetrics metrics) {
+            this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
             return this;
         }
 
