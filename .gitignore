@@ -28,3 +28,8 @@ Thumbs.db
 *.ear
 *.log
 
+# Secrets — never commit real credentials here
+*.gpg
+secring.*
+local.gradle.properties
+

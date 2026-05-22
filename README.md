@@ -63,6 +63,31 @@ All coordination happens through lock-free `ConcurrentHashMap` atomics — no mo
 
 ---
 
+## Installation
+
+CoalesceX is published to Maven Central under `io.github.gajjela521:coalescex`.
+
+**Gradle (Kotlin DSL)**
+```kotlin
+implementation("io.github.gajjela521:coalescex:1.2.0")
+```
+
+**Gradle (Groovy DSL)**
+```groovy
+implementation 'io.github.gajjela521:coalescex:1.2.0'
+```
+
+**Maven**
+```xml
+<dependency>
+    <groupId>io.github.gajjela521</groupId>
+    <artifactId>coalescex</artifactId>
+    <version>1.2.0</version>
+</dependency>
+```
+
+---
+
 ## Requirements
 
 - Java 21 or later (Virtual Thread support)

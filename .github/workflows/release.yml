@@ -1,0 +1,51 @@
+name: Release to Maven Central
+
+# Fires when a version tag is pushed: git tag v1.2.0 && git push --tags
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    name: Publish to Maven Central
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-21-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+
+      # Publishes, signs, bundles, and releases to Maven Central in one step.
+      # Required GitHub repository secrets:
+      #   MAVEN_CENTRAL_USERNAME — from central.sonatype.com → Account → Generate User Token
+      #   MAVEN_CENTRAL_PASSWORD — same token generation step
+      #   GPG_SIGNING_KEY        — base64-encoded ASCII-armored GPG private key
+      #                            gpg --export-secret-keys --armor KEY_ID | base64 -w0
+      #   GPG_SIGNING_PASSWORD   — GPG key passphrase
+      - name: Publish and release to Maven Central
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_SIGNING_PASSWORD }}
+        run: ./gradlew publishAndReleaseToMavenCentral --no-daemon --no-parallel
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            build/libs/*.jar
