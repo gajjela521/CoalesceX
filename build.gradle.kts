@@ -2,7 +2,7 @@ plugins {
     id("java")
 }
 
-group = "com.github.yourusername"
+group = "com.github.gajjela521"
 version = "1.0.0"
 
 repositories {
@@ -28,4 +28,5 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
 

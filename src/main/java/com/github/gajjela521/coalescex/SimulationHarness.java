@@ -1,4 +1,4 @@
-package com.github.yourusername.coalescex;
+package com.github.gajjela521.coalescex;
 
 import java.time.Duration;
 import java.time.Instant;

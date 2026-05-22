@@ -1,4 +1,4 @@
-package com.github.yourusername.coalescex;
+package com.github.gajjela521.coalescex;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
