@@ -2,8 +2,6 @@
 .gradle/
 build/
 gradle-app.setting
-!gradle-wrapper.jar
-!gradle-wrapper.properties
 
 # IDE
 .idea/
@@ -21,12 +19,16 @@ gradle-app.setting
 .LSOverride
 Thumbs.db
 
-# Java
+# Java — ignore compiled/packaged artifacts
 *.class
 *.jar
 *.war
 *.ear
 *.log
+
+# Re-include Gradle wrapper JARs (negations must come AFTER the *.jar rule)
+!gradle/wrapper/gradle-wrapper.jar
+!gradle-wrapper.properties
 
 # Secrets — never commit real credentials here
 *.gpg
