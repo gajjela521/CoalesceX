@@ -2,72 +2,142 @@ package com.github.gajjela521.coalescex;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * SimulationHarness: Demonstrates the CoalesceX request-collapsing
- * utility in action with 10,000 concurrent virtual threads.
+ * Demonstration harness showcasing CoalesceX thundering-herd prevention across
+ * three realistic scenarios.
  *
- * Shows the dramatic reduction in actual upstream database hits
- * when identical requests are coalesced rather than executed
- * in parallel.
+ * <p>Run via: {@code ./gradlew run}
  */
 public class SimulationHarness {
-    public static void main(String[] args) throws InterruptedException {
-        RequestCoalescer<String, String> gateway = new RequestCoalescer<>();
-        AtomicInteger databaseHitCounter = new AtomicInteger(0);
 
-        int totalConcurrentUsers = 10_000;
-        CountDownLatch startSignal = new CountDownLatch(1);
-        CountDownLatch completionSignal = new CountDownLatch(totalConcurrentUsers);
+    public static void main(String[] args) throws Exception {
+        System.out.println("╔══════════════════════════════════════════════╗");
+        System.out.println("║   CoalesceX — Request Coalescing Demo        ║");
+        System.out.println("╚══════════════════════════════════════════════╝\n");
 
-        System.out.println("🚀 CoalesceX Simulation Harness");
-        System.out.println("===============================");
-        System.out.println("Initializing " + totalConcurrentUsers + " virtual threads simulating a thundering herd...\n");
+        scenario1_ThunderingHerd();
+        scenario2_MultipleDistinctKeys();
+        scenario3_FailureEviction();
+    }
 
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (int i = 0; i < totalConcurrentUsers; i++) {
-                executor.submit(() -> {
-                    try {
-                        startSignal.await(); // Synchronize all virtual threads to assault simultaneously
+    // ------------------------------------------------------------------
+    // Scenario 1 — Classic thundering herd on one hot key
+    // ------------------------------------------------------------------
 
-                        String payload = gateway.compute("SQL_QUERY_CUSTOMER_METADATA_CA_94107", () -> {
-                            // This block simulates the expensive network bottleneck
-                            databaseHitCounter.incrementAndGet();
-                            try {
-                                Thread.sleep(200); // Simulate network latency
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                            }
-                            return "{ \"status\": \"ACTIVE\", \"tier\": \"ENTERPRISE\" }";
-                        });
+    static void scenario1_ThunderingHerd() throws Exception {
+        System.out.println("━━━ Scenario 1: Thundering Herd (10,000 threads, one hot key) ━━━\n");
 
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    } finally {
-                        completionSignal.countDown();
-                    }
-                });
+        RequestCoalescer<String, String> coalescer = RequestCoalescer.create();
+        AtomicInteger upstreamHits = new AtomicInteger();
+        int threadCount = 10_000;
+
+        CountDownLatch startGate = new CountDownLatch(1);
+        List<Future<String>> futures = new ArrayList<>(threadCount);
+
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(pool.submit(() -> {
+                    startGate.await();
+                    return coalescer.compute("HOT_KEY:customer:metadata:tier", () -> {
+                        upstreamHits.incrementAndGet();
+                        try { Thread.sleep(150); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                        return "{\"tier\":\"ENTERPRISE\",\"status\":\"ACTIVE\"}";
+                    });
+                }));
             }
 
             Instant start = Instant.now();
-            startSignal.countDown(); // Release the floodgates!
-            completionSignal.await();
-            Instant end = Instant.now();
+            startGate.countDown();
+            for (Future<String> f : futures) f.get(10, TimeUnit.SECONDS);
+            long elapsed = Duration.between(start, Instant.now()).toMillis();
 
-            System.out.println("=== PERFORMANCE REPORT ===\n");
-            System.out.println("Total Simulated Incoming Requests : " + totalConcurrentUsers);
-            System.out.println("Actual Physical Upstream DB Hits   : " + databaseHitCounter.get());
-            System.out.println("Request Coalescing Efficiency      : " +
-                String.format("%.2f%%", (1.0 - (double) databaseHitCounter.get() / totalConcurrentUsers) * 100));
-            System.out.println("Total Execution Time               : " +
-                Duration.between(start, end).toMillis() + " ms\n");
-
-            System.out.println("✅ CoalesceX successfully prevented " + (totalConcurrentUsers - databaseHitCounter.get()) +
-                " redundant upstream requests!");
+            CoalescerMetrics m = coalescer.metrics();
+            System.out.printf("  Concurrent callers     : %,d%n", threadCount);
+            System.out.printf("  Actual upstream hits   : %d%n",  upstreamHits.get());
+            System.out.printf("  Coalescing efficiency  : %.2f%%%n", m.coalescingEfficiency() * 100);
+            System.out.printf("  Total wall-clock time  : %d ms%n%n", elapsed);
         }
     }
-}
 
+    // ------------------------------------------------------------------
+    // Scenario 2 — Multiple distinct keys (independent upstream calls)
+    // ------------------------------------------------------------------
+
+    static void scenario2_MultipleDistinctKeys() throws Exception {
+        System.out.println("━━━ Scenario 2: 50 distinct keys × 200 threads each ━━━\n");
+
+        RequestCoalescer<String, String> coalescer = RequestCoalescer.create();
+        AtomicInteger upstreamHits = new AtomicInteger();
+        int keyCount   = 50;
+        int perKey     = 200;
+        int totalCalls = keyCount * perKey;
+
+        CountDownLatch startGate = new CountDownLatch(1);
+        List<Future<String>> futures = new ArrayList<>(totalCalls);
+
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int k = 0; k < keyCount; k++) {
+                String key = "product:sku:" + k;
+                for (int t = 0; t < perKey; t++) {
+                    futures.add(pool.submit(() -> {
+                        startGate.await();
+                        return coalescer.compute(key, () -> {
+                            upstreamHits.incrementAndGet();
+                            try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                            return "sku-data";
+                        });
+                    }));
+                }
+            }
+
+            startGate.countDown();
+            for (Future<String> f : futures) f.get(10, TimeUnit.SECONDS);
+
+            System.out.printf("  Total compute() calls  : %,d%n", totalCalls);
+            System.out.printf("  Actual upstream hits   : %d  (expected ≈ %d)%n",
+                    upstreamHits.get(), keyCount);
+            System.out.printf("  Coalescing efficiency  : %.2f%%%n%n",
+                    coalescer.metrics().coalescingEfficiency() * 100);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Scenario 3 — Failure eviction: failed requests are retried
+    // ------------------------------------------------------------------
+
+    static void scenario3_FailureEviction() throws Exception {
+        System.out.println("━━━ Scenario 3: Failure Eviction (failed entries are retried) ━━━\n");
+
+        RequestCoalescer<String, String> coalescer = RequestCoalescer.create();
+        AtomicInteger attempt = new AtomicInteger();
+
+        // First call — loader throws; the failed future must be evicted.
+        try {
+            coalescer.compute("flaky-service", () -> {
+                attempt.incrementAndGet();
+                throw new RuntimeException("Service temporarily unavailable");
+            });
+        } catch (RuntimeException ex) {
+            System.out.println("  Attempt 1 failed (expected): " + ex.getMessage());
+        }
+
+        // Second call — a fresh loader is dispatched because the failed future was evicted.
+        String result = coalescer.compute("flaky-service", () -> {
+            attempt.incrementAndGet();
+            return "recovered-payload";
+        });
+
+        System.out.printf("  Attempt 2 succeeded: %s%n", result);
+        System.out.printf("  Total loader invocations: %d (failure was correctly evicted)%n%n",
+                attempt.get());
+
+        CoalescerMetrics m = coalescer.metrics();
+        System.out.println("  Final metrics: " + m);
+        System.out.println();
+    }
+}
