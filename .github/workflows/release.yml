@@ -32,18 +32,31 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-21-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
 
+      # Decode the base64 GPG key into a multiline GITHUB_ENV entry so that
+      # Gradle's signing plugin receives the raw ASCII-armored PGP block.
+      # useInMemoryPgpKeys() requires the plain armored text, not base64.
+      - name: Decode GPG signing key
+        env:
+          GPG_KEY_BASE64: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          {
+            echo 'SIGNING_KEY<<GPG_EOF'
+            echo "$GPG_KEY_BASE64" | base64 --decode
+            echo 'GPG_EOF'
+          } >> "$GITHUB_ENV"
+
       # Publishes, signs, bundles, and releases to Maven Central in one step.
       # Required GitHub repository secrets:
       #   MAVEN_CENTRAL_USERNAME — from central.sonatype.com → Account → Generate User Token
       #   MAVEN_CENTRAL_PASSWORD — same token generation step
       #   GPG_SIGNING_KEY        — base64-encoded ASCII-armored GPG private key
-      #                            gpg --export-secret-keys --armor KEY_ID | base64 -w0
+      #                            gpg --export-secret-keys --armor KEY_ID | base64 | tr -d '\n'
       #   GPG_SIGNING_PASSWORD   — GPG key passphrase
       - name: Publish and release to Maven Central
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ env.SIGNING_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_SIGNING_PASSWORD }}
         run: ./gradlew publishAndReleaseToMavenCentral --no-daemon --no-parallel
 
