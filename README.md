@@ -9,7 +9,7 @@ stampedes without ever touching a `synchronized` block or a `ReentrantLock`.
 
 [![CI](https://github.com/gajjela521/CoalesceX/actions/workflows/ci.yml/badge.svg)](https://github.com/gajjela521/CoalesceX/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
 ![Maven Central](https://img.shields.io/maven-central/v/io.github.gajjela521/coalescex)
 
 ---
