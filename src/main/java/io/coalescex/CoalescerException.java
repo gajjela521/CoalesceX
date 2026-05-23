@@ -1,4 +1,4 @@
-package com.github.gajjela521.coalescex;
+package io.coalescex;
 
 /**
  * Unchecked exception thrown when a coalesced upstream loader fails with a checked exception.

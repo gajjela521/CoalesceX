@@ -1,4 +1,4 @@
-package com.github.gajjela521.coalescex;
+package io.coalescex;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

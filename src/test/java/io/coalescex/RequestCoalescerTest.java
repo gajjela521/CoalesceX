@@ -1,4 +1,4 @@
-package com.github.gajjela521.coalescex;
+package io.coalescex;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

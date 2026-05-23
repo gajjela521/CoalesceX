@@ -1,4 +1,4 @@
-package com.github.gajjela521.coalescex;
+package io.coalescex;
 
 /**
  * Immutable, point-in-time snapshot of {@link RequestCoalescer} runtime statistics.

@@ -1,4 +1,4 @@
-package com.github.gajjela521.coalescex;
+package io.coalescex;
 
 import java.time.Duration;
 import java.util.function.Supplier;

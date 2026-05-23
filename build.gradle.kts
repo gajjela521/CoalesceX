@@ -7,7 +7,6 @@ plugins {
 }
 
 // Maven coordinates — io.github.* namespace is auto-verified by Sonatype for GitHub accounts.
-// The Java package (com.github.gajjela521.coalescex) is independent of the Maven groupId.
 group   = "io.github.gajjela521"
 version = "1.2.0"
 
@@ -29,7 +28,7 @@ java {
 }
 
 application {
-    mainClass.set("com.github.gajjela521.coalescex.SimulationHarness")
+    mainClass.set("io.coalescex.SimulationHarness")
 }
 
 dependencies {

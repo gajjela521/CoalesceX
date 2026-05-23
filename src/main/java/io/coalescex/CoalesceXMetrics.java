@@ -1,4 +1,4 @@
-package com.github.gajjela521.coalescex;
+package io.coalescex;
 
 /**
  * SPI for plugging custom metrics collection (Micrometer, OpenTelemetry, etc.)
