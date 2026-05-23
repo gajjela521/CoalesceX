@@ -8,12 +8,22 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.2.0] — 2025-05-23
+## [1.3.0] — 2026-05-23
+
+### Changed
+- Maven groupId changed from `io.github.gajjela521` to `io.github.coalescex` — removes the personal
+  GitHub username from the published artifact coordinates
+- GitHub repository transferred to the `coalescex` org: `github.com/coalescex/CoalesceX`
+- Canonical Maven coordinates are now `io.github.coalescex:coalescex:1.3.0`
+
+## [1.2.0] — 2026-05-23
 
 ### Changed
 - Renamed Java package from `com.github.gajjela521.coalescex` to `io.coalescex` for a clean, product-centric namespace
 - Source tree relocated to `src/main/java/io/coalescex/` and `src/test/java/io/coalescex/`
 - License changed from MIT to Apache 2.0
+- Developer contact updated to `gajjelsa@protonmail.com`
+- Added `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`
 
 ## [1.1.0] — 2025-04-18
 
@@ -37,7 +47,8 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - SLF4J 2.x logging integration
 - Full JUnit 5 test suite
 
-[Unreleased]: https://github.com/gajjela521/CoalesceX/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/gajjela521/CoalesceX/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/gajjela521/CoalesceX/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/gajjela521/CoalesceX/releases/tag/v1.0.0
+[Unreleased]: https://github.com/coalescex/CoalesceX/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/coalescex/CoalesceX/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/coalescex/CoalesceX/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/coalescex/CoalesceX/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/coalescex/CoalesceX/releases/tag/v1.0.0

@@ -7,10 +7,10 @@ same resource into a single upstream execution. Every caller transparently recei
 result once it resolves — eliminating redundant database queries, HTTP fetches, and cache-miss
 stampedes without ever touching a `synchronized` block or a `ReentrantLock`.
 
-[![CI](https://github.com/gajjela521/CoalesceX/actions/workflows/ci.yml/badge.svg)](https://github.com/gajjela521/CoalesceX/actions/workflows/ci.yml)
+[![CI](https://github.com/coalescex/CoalesceX/actions/workflows/ci.yml/badge.svg)](https://github.com/coalescex/CoalesceX/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/Java-21%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
-![Maven Central](https://img.shields.io/maven-central/v/io.github.gajjela521/coalescex)
+![Maven Central](https://img.shields.io/maven-central/v/io.github.coalescex/coalescex)
 
 ---
 
@@ -579,24 +579,24 @@ that is written on every request and read rarely (monitoring polls), this is the
 
 ## Installation
 
-CoalesceX is published to Maven Central under `io.github.gajjela521:coalescex`.
+CoalesceX is published to Maven Central under `io.github.coalescex:coalescex`.
 
 **Gradle (Kotlin DSL)**
 ```kotlin
-implementation("io.github.gajjela521:coalescex:1.2.0")
+implementation("io.github.coalescex:coalescex:1.3.0")
 ```
 
 **Gradle (Groovy DSL)**
 ```groovy
-implementation 'io.github.gajjela521:coalescex:1.2.0'
+implementation 'io.github.coalescex:coalescex:1.3.0'
 ```
 
 **Maven**
 ```xml
 <dependency>
-    <groupId>io.github.gajjela521</groupId>
+    <groupId>io.github.coalescex</groupId>
     <artifactId>coalescex</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 

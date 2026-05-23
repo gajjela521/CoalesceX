@@ -6,9 +6,9 @@ plugins {
     id("com.vanniktech.maven.publish") version "0.28.0"
 }
 
-// Maven coordinates — io.github.* namespace is auto-verified by Sonatype for GitHub accounts.
-group   = "io.github.gajjela521"
-version = "1.2.0"
+// Maven coordinates — io.github.coalescex is auto-verified by Sonatype via the coalescex GitHub org.
+group   = "io.github.coalescex"
+version = "1.3.0"
 
 repositories {
     mavenCentral()
@@ -78,7 +78,7 @@ mavenPublishing {
     signAllPublications()
 
     coordinates(
-        groupId    = "io.github.gajjela521",
+        groupId    = "io.github.coalescex",
         artifactId = "coalescex",
         version    = version.toString()
     )
@@ -90,7 +90,7 @@ mavenPublishing {
             "architectures. Prevents thundering-herd distributed I/O storms by coalescing " +
             "concurrent requests without carrier-thread pinning."
         )
-        url.set("https://github.com/gajjela521/CoalesceX")
+        url.set("https://github.com/coalescex/CoalesceX")
         inceptionYear.set("2024")
 
         licenses {
@@ -111,14 +111,14 @@ mavenPublishing {
         }
 
         scm {
-            url.set("https://github.com/gajjela521/CoalesceX")
-            connection.set("scm:git:https://github.com/gajjela521/CoalesceX.git")
-            developerConnection.set("scm:git:ssh://git@github.com/gajjela521/CoalesceX.git")
+            url.set("https://github.com/coalescex/CoalesceX")
+            connection.set("scm:git:https://github.com/coalescex/CoalesceX.git")
+            developerConnection.set("scm:git:ssh://git@github.com/coalescex/CoalesceX.git")
         }
 
         issueManagement {
             system.set("GitHub Issues")
-            url.set("https://github.com/gajjela521/CoalesceX/issues")
+            url.set("https://github.com/coalescex/CoalesceX/issues")
         }
     }
 }

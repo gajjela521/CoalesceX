@@ -7,7 +7,7 @@ Thank you for your interest in contributing. This document covers how to build, 
 Requirements: **Java 21+**, **Gradle 9+**
 
 ```bash
-git clone https://github.com/gajjela521/CoalesceX.git
+git clone https://github.com/coalescex/CoalesceX.git
 cd CoalesceX
 
 # Full build with all tests
