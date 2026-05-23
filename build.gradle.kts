@@ -95,8 +95,8 @@ mavenPublishing {
 
         licenses {
             license {
-                name.set("MIT License")
-                url.set("https://opensource.org/licenses/MIT")
+                name.set("Apache License, Version 2.0")
+                url.set("https://www.apache.org/licenses/LICENSE-2.0")
                 distribution.set("repo")
             }
         }
@@ -105,7 +105,7 @@ mavenPublishing {
             developer {
                 id.set("gajjela521")
                 name.set("Surya Teja Gajjela")
-                email.set("gajjelasuryateja2021@gmail.com")
+                email.set("gajjelsa@protonmail.com")
                 url.set("https://github.com/gajjela521")
             }
         }
